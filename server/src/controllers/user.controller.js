@@ -1,6 +1,7 @@
 import ApiError from "../utils/error.util.js";
 import User from "../models/user.model.js";
-import { token } from "morgan";
+import cloudinary from "cloudinary";
+import fs from "fs";
 
 const cookieOptions = {
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
@@ -18,7 +19,7 @@ export const register = async (req, res, next) => {
 
     const userExists = await User.findOne({ email });
     if (userExists) {
-      return next(new ApiError("User alreasy Exist with this email", 400));
+      throw new ApiError("User alreasy Exist with this email", 400);
     }
 
     const user = await User.create({
@@ -31,27 +32,44 @@ export const register = async (req, res, next) => {
       },
     });
     if (!user) {
-      return next(
-        new ApiError("User registration Failed, Please try again", 400)
-      );
+      throw new ApiError("User registration Failed, Please try again", 400);
     }
 
     //   TODO: File upload
 
-    await user.save();
-    user.password = undefined;
+    if (req.file) {
+      console.log(req.file);
+      try {
+        const result = await cloudinary.v2.uploader.upload(req.file.path, {
+          resource_type: "auto",
+        });
+
+        if (result) {
+          user.avatar.public_id = result.public_id;
+          user.avatar.secure_url = result.secure_url;
+
+          // remove file from local
+          // fs.rm(`./public/temp/${req.file.filename}`);
+          fs.unlinkSync(req.file.path);
+        }
+      } catch (error) {
+        return next(new ApiError(error || "file not uploaded ", 500));
+      }
+    }
+
+    // await user.save();
 
     const token = await user.generateJWTToken();
+    user.password = undefined;
+    // res
 
-    res.cookie("token", token, cookieOptions);
-
-    res.status(201).json({
+    return res.cookie("token", token, cookieOptions).status(201).json({
       success: true,
       message: "User registered Successfully",
       user,
     });
   } catch (error) {
-    return next(new ApiError("User registration Failed", 500));
+    return next(new ApiError(error.message, 500));
   }
 };
 
