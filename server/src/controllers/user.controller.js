@@ -2,6 +2,7 @@ import ApiError from "../utils/error.util.js";
 import User from "../models/user.model.js";
 import cloudinary from "cloudinary";
 import fs from "fs";
+import sendEmail from "../utils/sensEmail.js";
 
 const cookieOptions = {
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
@@ -57,11 +58,10 @@ export const register = async (req, res, next) => {
       }
     }
 
-    // await user.save();
+    await user.save();
 
     const token = await user.generateJWTToken();
-    user.password = undefined;
-    // res
+    // user.password = undefined;
 
     return res.cookie("token", token, cookieOptions).status(201).json({
       success: true,
@@ -129,3 +129,43 @@ export const getProfileDetail = async (req, res, next) => {
     return next(new ApiError("Failed to fetch User details", 500));
   }
 };
+
+export const forgotPassword = async (req, res, next) => {
+  const { email } = req.body;
+  if (!email) {
+    return next(new ApiError("Email is required", 400));
+  }
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    return next(new ApiError("Email is not regisered", 400));
+  }
+
+  const resetToken = await user.generatePasswordResetToken();
+
+  await user.save();
+  console.log(user);
+
+  const resetPasswordURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+  const subject = "reset Password";
+  const message = `${resetPasswordURL}`;
+
+  try {
+    await sendEmail(email, subject, message);
+
+    res.status(200).json({
+      success: true,
+      message: `Reset password token has been sent to ${email} successfully`,
+    });
+  } catch (error) {
+    user.forgotPasswordExpiry = undefined;
+    user.forgotPasswordToken = undefined;
+
+    await user.save();
+
+    return next(new ApiError(error.message, 500));
+  }
+};
+
+export const resetPassword = async () => {};
